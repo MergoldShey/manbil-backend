@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Helvetica', sans-serif; margin: 40px; }
+        .header { display: flex; justify-content: space-between; border-bottom: 2px solid #eee; padding-bottom: 20px; }
+        .invoice-title { font-size: 24px; color: #333; }
+        .details { margin: 30px 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f8f8; text-align: left; padding: 10px; }
+        td { padding: 10px; border-bottom: 1px solid #eee; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="invoice-title">INVOICE</div>
+        <div>Date: {{generated_at}}</div>
+    </div>
+    <div class="details">
+        <p><strong>Customer:</strong> {{customer_name}}</p>
+        <p><strong>Order ID:</strong> {{order_id}}</p>
+    </div>
+    <table>
+    <tr>
+        <th>Product</th>
+        <th>Quantity</th>
+        <th>Unit Price</th>
+        <th>Total Price</th>
+    </tr>
+    <tr>
+        <td>{{product_name}}</td>
+        <td>{{quantity}}</td>
+        <td>{{unit_price}}</td>
+        <td>{{total_price}}</td>
+    </tr>
+    </table>
+</body>
+</html>

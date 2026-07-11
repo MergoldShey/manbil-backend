@@ -1,0 +1,16 @@
+# Secure environment variables containing API keys
+.env
+
+# Local dependency folders (Koyeb and Vercel will download these fresh)
+node_modules/
+.pnp
+.pnp.js
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Operating system files
+.DS_Store
+Thumbs.db
