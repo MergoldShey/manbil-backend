@@ -1,8 +1,8 @@
-import { Resend } from 'resend';
+const { Resend } = require('resend');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-export const sendInvoiceEmail = async (toEmail, merchantName, invoicePdfUrl) => {
+const sendInvoiceEmail = async (toEmail, merchantName, invoicePdfUrl) => {
   try {
     const { data, error } = await resend.emails.send({
       from: 'manbil <onboarding@resend.dev>', // 🌟 Branded perfectly for your launch
@@ -29,3 +29,6 @@ export const sendInvoiceEmail = async (toEmail, merchantName, invoicePdfUrl) => 
     return { success: false, error: err.message };
   }
 };
+
+// Properly export the function using CommonJS module.exports
+module.exports = { sendInvoiceEmail };
