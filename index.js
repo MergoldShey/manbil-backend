@@ -17,7 +17,7 @@ app.use(cookieParser()); // Required to safely read authentication cookies from 
 // 2. Mount routing layers under explicit URL endpoint prefixes
 app.use('/api', ordersRouter);
 app.use('/orders', ordersRouter);
-app.use('/', shopifyAuthRouter); // Mounted Shopify installation routes safely to the root path
+app.use('/auth', shopifyAuthRouter); // Mounted Shopify installation routes safely to the root path
 
 // A live database connection test endpoint
 app.get('/test-db', async (req, res) => {

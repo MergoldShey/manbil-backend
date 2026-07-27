@@ -5,24 +5,35 @@ const path = require('path');
 const supabase = require('./config/supabase'); 
 
 /**
- * Checks a merchant's current tier limits and increments usage safely
+ * Checks a merchant's subscription quota and increments usage safely.
+ * Rejects invoice creation if monthly limits are reached.
  */
 async function checkAndIncrementUsage(merchant_id) {
-    // FIXED: Changed table pointer from plural 'merchants' to singular lowercase 'merchant' to match your frontend model parameters
     const { data: merchant, error } = await supabase
         .from('merchant')
-        .select('invoice_count')
+        .select('invoice_count, monthly_limit')
         .eq('id', merchant_id)
         .single();
 
-    if (error || !merchant) throw new Error("Merchant account data records not found");
+    if (error || !merchant) {
+        throw new Error("Merchant account data records not found");
+    }
+
+    // Enforce tier limit (default to 500 if limit not defined)
+    const limit = merchant.monthly_limit || 500;
+    if ((merchant.invoice_count || 0) >= limit) {
+        throw new Error("Monthly invoice limit reached. Please upgrade your plan to continue generating invoices.");
+    }
 
     const { error: updateError } = await supabase
         .from('merchant')
         .update({ invoice_count: (merchant.invoice_count || 0) + 1 })
         .eq('id', merchant_id);
 
-    if (updateError) throw new Error("Failed to update merchant usage counter analytics");
+    if (updateError) {
+        throw new Error("Failed to update merchant usage counter analytics");
+    }
+
     return true;
 }
 
@@ -30,31 +41,22 @@ async function checkAndIncrementUsage(merchant_id) {
  * Generates an invoice PDF using headless Chrome and uploads it to storage
  */
 async function generateAndUploadInvoice(orderData) {
+    // Check quota before launching browser process
     await checkAndIncrementUsage(orderData.merchant_id);
 
-   // REPLACED THE OLD LAUNCH ENGINE ARGS BLOCK:
-// const browser = await puppeteer.launch({
-//     executablePath: process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-//     args: ['--no-sandbox', '--disable-setuid-sandbox']
-// });
-
-// WITH THIS SECURE COMPATIBILITY BLOCK:
-const browser = await puppeteer.launch({
-    executablePath: process.env.CHROME_PATH,
-    args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage', // Prevents container crashes on low-spec host nodes
-        '--disable-gpu'            // Prevents checking for graphics drivers on server hosts
-    ]
-});
+    const browser = await puppeteer.launch({
+        executablePath: process.env.CHROME_PATH,
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage', // Prevents container crashes on low-spec host nodes
+            '--disable-gpu'            // Prevents checking for graphics drivers on server hosts
+        ]
+    });
+    
     const page = await browser.newPage();
 
-    // REPLACED THE OLD LINE:
-// let html = await fs.readFile('./templates/invoice-template.html', 'utf8');
-
-// WITH THIS NEW LINE:
-let html = await fs.readFile(path.join(__dirname, 'invoice-template.html'), 'utf8');
+    let html = await fs.readFile(path.join(__dirname, 'invoice-template.html'), 'utf8');
     
     // Replace layout placeholders with true order metrics
     html = html.replace('{{order_id}}', orderData.shopify_order_id)
@@ -80,4 +82,4 @@ let html = await fs.readFile(path.join(__dirname, 'invoice-template.html'), 'utf
     return publicUrl;
 }
 
-module.exports = { generateAndUploadInvoice };
+module.exports = { generateAndUploadInvoice, checkAndIncrementUsage };
