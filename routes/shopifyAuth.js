@@ -119,9 +119,10 @@ router.get("/shopify/callback", async (req, res) => {
         .eq("shop_domain", shop);
       dbError = error;
     } else {
-      // Insert new record
+      // Insert new record with an explicit UUID
       const { error } = await supabase.from("merchant").insert([
         {
+          id: crypto.randomUUID(),
           shop_domain: shop,
           access_token: accessToken,
           store_name: shop.replace(".myshopify.com", ""),
