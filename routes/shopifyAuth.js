@@ -102,9 +102,25 @@ router.get("/shopify/callback", async (req, res) => {
       );
     }
 
-    const { data, error } = await supabase
+    // Check if merchant already exists
+    const { data: existingMerchant } = await supabase
       .from("merchant")
-      .upsert(
+      .select("id")
+      .eq("shop_domain", shop)
+      .single();
+
+    let dbError;
+
+    if (existingMerchant) {
+      // Update existing record
+      const { error } = await supabase
+        .from("merchant")
+        .update({ access_token: accessToken })
+        .eq("shop_domain", shop);
+      dbError = error;
+    } else {
+      // Insert new record
+      const { error } = await supabase.from("merchant").insert([
         {
           shop_domain: shop,
           access_token: accessToken,
@@ -113,13 +129,13 @@ router.get("/shopify/callback", async (req, res) => {
           invoice_count: 0,
           invoice_limit: 50,
         },
-        { onConflict: "shop_domain" },
-      )
-      .select();
+      ]);
+      dbError = error;
+    }
 
-    if (error) {
+    if (dbError) {
       throw new Error(
-        `Failed to sync Shopify account profile metadata to database: ${error.message}`,
+        `Failed to sync Shopify account profile metadata to database: ${dbError.message}`,
       );
     }
 
