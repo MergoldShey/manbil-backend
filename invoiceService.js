@@ -50,58 +50,58 @@ async function checkAndIncrementUsage(merchant_id) {
 /**
  * Generates an invoice PDF using headless Chrome and uploads it to storage
  */
+/**
+ * Generates an invoice PDF using headless Chrome and uploads it to storage
+ */
 async function generateAndUploadInvoice(orderData) {
-  // Check quota before launching browser process
-  await checkAndIncrementUsage(orderData.merchant_id);
+    // Check quota before launching browser process
+    await checkAndIncrementUsage(orderData.merchant_id);
 
-  const browser = await puppeteer.launch({
-    executablePath: process.env.CHROME_PATH,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage", // Prevents container crashes on low-spec host nodes
-      "--disable-gpu", // Prevents checking for graphics drivers on server hosts
-    ],
-  });
+    // Dynamic browser path: Use local CHROME_PATH if present on Windows, 
+    // otherwise let Puppeteer use installed/bundled Chrome in cloud Linux
+    const launchOptions = {
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu'
+        ]
+    };
 
-  const page = await browser.newPage();
+    // Only set executablePath if explicitly running locally on Windows with a local path
+    if (process.env.CHROME_PATH && process.env.CHROME_PATH.includes('C:\\')) {
+        if (process.env.NODE_ENV !== 'production') {
+            launchOptions.executablePath = process.env.CHROME_PATH;
+        }
+    }
 
-  let html = await fs.readFile(
-    path.join(__dirname, "invoice-template.html"),
-    "utf8",
-  );
+    const browser = await puppeteer.launch(launchOptions);
+    
+    const page = await browser.newPage();
 
-  // Replace layout placeholders with true order metrics
-  html = html
-    .replace("{{order_id}}", orderData.shopify_order_id)
-    .replace("{{customer_name}}", orderData.customer_name)
-    .replace("{{product_name}}", orderData.product_name)
-    .replace("{{quantity}}", orderData.quantity)
-    .replace("{{unit_price}}", orderData.unit_price)
-    .replace(
-      "{{total_price}}",
-      (orderData.quantity * orderData.unit_price).toFixed(2),
-    )
-    .replace("{{generated_at}}", new Date().toLocaleDateString());
+    let html = await fs.readFile(path.join(__dirname, 'invoice-template.html'), 'utf8');
+    
+    // Replace layout placeholders with true order metrics
+    html = html.replace('{{order_id}}', orderData.shopify_order_id)
+        .replace('{{customer_name}}', orderData.customer_name)
+        .replace('{{product_name}}', orderData.product_name)
+        .replace('{{quantity}}', orderData.quantity)
+        .replace('{{unit_price}}', orderData.unit_price)
+        .replace('{{total_price}}', (orderData.quantity * orderData.unit_price).toFixed(2))
+        .replace('{{generated_at}}', new Date().toLocaleDateString());
 
-  await page.setContent(html);
-  const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
-  await browser.close();
+    await page.setContent(html);
+    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
+    await browser.close();
 
-  const filename = `invoices/${orderData.shopify_order_id || orderData.id}.pdf`;
-  const { error } = await supabase.storage
-    .from("invoices")
-    .upload(filename, pdfBuffer, {
-      contentType: "application/pdf",
-      upsert: true,
-    });
+    const filename = `invoices/${orderData.shopify_order_id || orderData.id}.pdf`;
+    const { error } = await supabase.storage
+        .from('invoices')
+        .upload(filename, pdfBuffer, { contentType: 'application/pdf', upsert: true });
 
-  if (error) throw error;
+    if (error) throw error;
 
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from("invoices").getPublicUrl(filename);
-  return publicUrl;
+    const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(filename);
+    return publicUrl;
 }
-
 module.exports = { generateAndUploadInvoice, checkAndIncrementUsage };
