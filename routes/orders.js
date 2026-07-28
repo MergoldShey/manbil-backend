@@ -15,25 +15,40 @@ router.post("/shopify-webhook", async (req, res) => {
     const orderData = req.body;
 
     // 1. DYNAMIC MERCHANT LOOKUP
-    // Extract shop domain from Shopify webhook headers if available
-    const shopDomain = req.headers["x-shopify-shop-domain"];
+    // Extract shop domain flexibly from headers or payload body, converting to lowercase
+    const rawDomain =
+      req.headers["x-shopify-shop-domain"] ||
+      orderData.domain ||
+      orderData.shop ||
+      "manbil-test-store.myshopify.com";
+
+    const shopDomain = rawDomain ? rawDomain.toLowerCase().trim() : null;
     let merchant_id = orderData.merchant_id;
 
-    // If merchant_id wasn't provided directly in the body, resolve it using the shop domain
+    // Resolve merchant_id using the shop domain if not directly provided
     if (!merchant_id && shopDomain) {
       const { data: merchantRecord, error: merchantError } = await supabase
         .from("merchant")
         .select("id")
         .eq("shop_domain", shopDomain)
-        .single();
+        .maybeSingle();
 
-      if (merchantError || !merchantRecord) {
-        return res.status(400).json({
-          success: false,
-          error: `Merchant account not found for store domain: ${shopDomain}`,
-        });
+      if (merchantError) {
+        console.error("Supabase merchant lookup error:", merchantError.message);
       }
-      merchant_id = merchantRecord.id;
+
+      if (merchantRecord) {
+        merchant_id = merchantRecord.id;
+      }
+    }
+
+    // Strict validation if merchant still cannot be resolved
+    if (!merchant_id) {
+      console.error(`Merchant account lookup failed for domain: ${shopDomain}`);
+      return res.status(400).json({
+        success: false,
+        error: `Merchant account data record not found for domain: ${shopDomain}`,
+      });
     }
 
     // 2. EXTRACT ORDER IDENTIFIERS & CUSTOMER DETAILS SAFELY
@@ -56,7 +71,6 @@ router.post("/shopify-webhook", async (req, res) => {
     if (!customer_name) customer_name = "Valued Customer";
 
     // 3. EXTRACT PRODUCT & LINE ITEM DETAILS SAFELY
-    // Handles Shopify line_items array or direct single-item payloads
     const firstLineItem =
       orderData.line_items && orderData.line_items.length > 0
         ? orderData.line_items[0]
@@ -83,30 +97,18 @@ router.post("/shopify-webhook", async (req, res) => {
     const currency = orderData.currency || "USD";
 
     // 4. STRICT EARLY-RETURN VALIDATION
-    if (!merchant_id) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: "Missing required merchant_id lookup mapping.",
-        });
-    }
     if (!shopify_order_id) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error:
-            "Missing valid transaction identifier (id, shopify_order_id, or order_id).",
-        });
+      return res.status(400).json({
+        success: false,
+        error:
+          "Missing valid transaction identifier (id, shopify_order_id, or order_id).",
+      });
     }
     if (!customer_email) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: "Missing customer_email parameter needed for delivery.",
-        });
+      return res.status(400).json({
+        success: false,
+        error: "Missing customer_email parameter needed for delivery.",
+      });
     }
 
     // 5. DATABASE LAYER: Save locked pricing snapshot to 'orders' table
