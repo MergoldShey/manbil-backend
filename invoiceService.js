@@ -9,7 +9,6 @@ const supabase = require("./config/supabase");
  * Rejects invoice creation if monthly limits are reached.
  */
 async function checkAndIncrementUsage(merchant_id) {
-  // Fixed: Selected 'invoice_limit' to match the true Supabase schema
   const { data: merchant, error } = await supabase
     .from("merchant")
     .select("invoice_count, invoice_limit")
@@ -24,8 +23,8 @@ async function checkAndIncrementUsage(merchant_id) {
     throw new Error("Merchant account data records not found");
   }
 
-  // Enforce tier limit (default to 50 if limit not defined)
-  const limit = merchant.invoice_limit || 50;
+  // Enforce tier limit (default to 500 if limit not defined)
+  const limit = merchant.invoice_limit || 500;
   if ((merchant.invoice_count || 0) >= limit) {
     throw new Error(
       "Monthly invoice limit reached. Please upgrade your plan to continue generating invoices.",
@@ -51,54 +50,71 @@ async function checkAndIncrementUsage(merchant_id) {
  * Generates an invoice PDF using headless Chrome and uploads it to storage
  */
 async function generateAndUploadInvoice(orderData) {
-    // Check quota before launching browser process
-    await checkAndIncrementUsage(orderData.merchant_id);
+  // Check quota before launching browser process
+  await checkAndIncrementUsage(orderData.merchant_id);
 
-    // Dynamic browser path: Use local CHROME_PATH if present on Windows, 
-    // otherwise let Puppeteer use installed/bundled Chrome in cloud Linux
-    const launchOptions = {
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu'
-        ]
-    };
+  const launchOptions = {
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+    ],
+  };
 
-    
-    // Use local executable if explicitly defined locally on Windows
-    if (process.env.CHROME_PATH && process.env.CHROME_PATH.includes('C:\\') && process.env.NODE_ENV !== 'production') {
-        launchOptions.executablePath = process.env.CHROME_PATH;
-    }
-    
+  // Use local executable if explicitly defined locally on Windows
+  if (
+    process.env.CHROME_PATH &&
+    process.env.CHROME_PATH.includes("C:\\") &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    launchOptions.executablePath = process.env.CHROME_PATH;
+  }
 
-    const browser = await puppeteer.launch(launchOptions);
-    
-    const page = await browser.newPage();
+  const browser = await puppeteer.launch(launchOptions);
+  const page = await browser.newPage();
 
-    let html = await fs.readFile(path.join(__dirname, 'invoice-template.html'), 'utf8');
-    ``
-    // Replace layout placeholders with true order metrics
-    html = html.replace('{{order_id}}', orderData.shopify_order_id)
-        .replace('{{customer_name}}', orderData.customer_name)
-        .replace('{{product_name}}', orderData.product_name)
-        .replace('{{quantity}}', orderData.quantity)
-        .replace('{{unit_price}}', orderData.unit_price)
-        .replace('{{total_price}}', (orderData.quantity * orderData.unit_price).toFixed(2))
-        .replace('{{generated_at}}', new Date().toLocaleDateString());
+  // Correct path pointing inside the templates directory
+  const templatePath = path.join(
+    __dirname,
+    "templates",
+    "invoice-template.html",
+  );
+  let html = await fs.readFile(templatePath, "utf8");
 
-    await page.setContent(html);
-    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
-    await browser.close();
+  // Replace layout placeholders with true order metrics matching your invoice-template.html
+  html = html
+    .replace("{{order_id}}", orderData.shopify_order_id || "")
+    .replace("{{customer_name}}", orderData.customer_name || "")
+    .replace("{{product_name}}", orderData.product_name || "")
+    .replace("{{quantity}}", orderData.quantity || "")
+    .replace("{{unit_price}}", orderData.unit_price || "")
+    .replace(
+      "{{total_price}}",
+      orderData.quantity && orderData.unit_price
+        ? (orderData.quantity * orderData.unit_price).toFixed(2)
+        : "0.00",
+    )
+    .replace("{{generated_at}}", new Date().toLocaleDateString());
 
-    const filename = `invoices/${orderData.shopify_order_id || orderData.id}.pdf`;
-    const { error } = await supabase.storage
-        .from('invoices')
-        .upload(filename, pdfBuffer, { contentType: 'application/pdf', upsert: true });
+  await page.setContent(html);
+  const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+  await browser.close();
 
-    if (error) throw error;
+  const filename = `invoices/${orderData.shopify_order_id || orderData.id}.pdf`;
+  const { error } = await supabase.storage
+    .from("invoices")
+    .upload(filename, pdfBuffer, {
+      contentType: "application/pdf",
+      upsert: true,
+    });
 
-    const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(filename);
-    return publicUrl;
+  if (error) throw error;
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from("invoices").getPublicUrl(filename);
+  return publicUrl;
 }
+
 module.exports = { generateAndUploadInvoice, checkAndIncrementUsage };
