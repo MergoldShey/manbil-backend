@@ -1,4 +1,4 @@
-const puppeteer = require("puppeteer-core");
+const puppeteer = require("puppeteer");
 const fs = require("fs").promises;
 const path = require("path");
 // Consume your centralized admin supabase client configuration asset directly
@@ -50,9 +50,6 @@ async function checkAndIncrementUsage(merchant_id) {
 /**
  * Generates an invoice PDF using headless Chrome and uploads it to storage
  */
-/**
- * Generates an invoice PDF using headless Chrome and uploads it to storage
- */
 async function generateAndUploadInvoice(orderData) {
     // Check quota before launching browser process
     await checkAndIncrementUsage(orderData.merchant_id);
@@ -68,19 +65,19 @@ async function generateAndUploadInvoice(orderData) {
         ]
     };
 
-    // Only set executablePath if explicitly running locally on Windows with a local path
-    if (process.env.CHROME_PATH && process.env.CHROME_PATH.includes('C:\\')) {
-        if (process.env.NODE_ENV !== 'production') {
-            launchOptions.executablePath = process.env.CHROME_PATH;
-        }
+    
+    // Use local executable if explicitly defined locally on Windows
+    if (process.env.CHROME_PATH && process.env.CHROME_PATH.includes('C:\\') && process.env.NODE_ENV !== 'production') {
+        launchOptions.executablePath = process.env.CHROME_PATH;
     }
+    
 
     const browser = await puppeteer.launch(launchOptions);
     
     const page = await browser.newPage();
 
     let html = await fs.readFile(path.join(__dirname, 'invoice-template.html'), 'utf8');
-    
+    ``
     // Replace layout placeholders with true order metrics
     html = html.replace('{{order_id}}', orderData.shopify_order_id)
         .replace('{{customer_name}}', orderData.customer_name)
