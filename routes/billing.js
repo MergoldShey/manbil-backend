@@ -32,74 +32,6 @@ router.post("/create-subscription", async (req, res) => {
     const host = process.env.HOST;
     const returnUrl = `${host}/billing/callback?shop=${shop}`;
 
-    /**
-     * HANDLE BILLING CALLBACK & ACTIVATE SUBSCRIPTION
-     * GET /billing/callback
-     */
-    router.get("/callback", async (req, res) => {
-      const { shop, charge_id } = req.query;
-
-      if (!shop || !charge_id) {
-        return res.status(400).send("Missing shop or charge_id parameters.");
-      }
-
-      try {
-        // 1. Fetch merchant's access token from Supabase
-        const { data: merchant, error } = await supabase
-          .from("merchant")
-          .select("id, access_token")
-          .eq("shop_domain", shop)
-          .single();
-
-        if (error || !merchant?.access_token) {
-          return res.status(404).send("Merchant record not found.");
-        }
-
-        // 2. Query Shopify to verify the charge status
-        const response = await fetch(
-          `https://${shop}/admin/api/2024-04/recurring_application_charges/${charge_id}.json`,
-          {
-            headers: {
-              "X-Shopify-Access-Token": merchant.access_token,
-            },
-          },
-        );
-
-        const chargeData = await response.json();
-        const charge = chargeData.recurring_application_charge;
-
-        if (charge && charge.status === "active") {
-          // 3. Upgrade merchant in Supabase (Increase invoice limit to 1000 for Pro plan)
-          const { error: updateError } = await supabase
-            .from("merchant")
-            .update({
-              subscription_plan: "pro",
-              invoice_limit: 1000,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", merchant.id);
-
-          if (updateError) {
-            throw new Error(
-              `Failed to update subscription in database: ${updateError.message}`,
-            );
-          }
-
-          // 4. Redirect merchant back to your frontend dashboard
-          return res.redirect(
-            `${process.env.FRONTEND_URL}/dashboard?shop=${shop}&billing=success`,
-          );
-        }
-
-        return res.redirect(
-          `${process.env.FRONTEND_URL}/dashboard?shop=${shop}&billing=failed`,
-        );
-      } catch (err) {
-        console.error("Billing Callback Processing Error:", err.message);
-        return res.status(500).send("Error processing billing activation.");
-      }
-    });
-
     // 2. GraphQL Mutation for Shopify AppSubscriptionCreate
     const graphqlQuery = {
       query: `
@@ -164,6 +96,74 @@ router.post("/create-subscription", async (req, res) => {
   } catch (err) {
     console.error("Shopify Billing Error:", err.message);
     return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * HANDLE BILLING CALLBACK & ACTIVATE SUBSCRIPTION
+ * GET /billing/callback
+ */
+router.get("/callback", async (req, res) => {
+  const { shop, charge_id } = req.query;
+
+  if (!shop || !charge_id) {
+    return res.status(400).send("Missing shop or charge_id parameters.");
+  }
+
+  try {
+    // 1. Fetch merchant's access token from Supabase
+    const { data: merchant, error } = await supabase
+      .from("merchant")
+      .select("id, access_token")
+      .eq("shop_domain", shop)
+      .single();
+
+    if (error || !merchant?.access_token) {
+      return res.status(404).send("Merchant record not found.");
+    }
+
+    // 2. Query Shopify to verify the charge status
+    const response = await fetch(
+      `https://${shop}/admin/api/2024-04/recurring_application_charges/${charge_id}.json`,
+      {
+        headers: {
+          "X-Shopify-Access-Token": merchant.access_token,
+        },
+      },
+    );
+
+    const chargeData = await response.json();
+    const charge = chargeData.recurring_application_charge;
+
+    if (charge && charge.status === "active") {
+      // 3. Upgrade merchant in Supabase (Increase invoice limit to 1000 for Pro plan)
+      const { error: updateError } = await supabase
+        .from("merchant")
+        .update({
+          subscription_plan: "pro",
+          invoice_limit: 1000,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", merchant.id);
+
+      if (updateError) {
+        throw new Error(
+          `Failed to update subscription in database: ${updateError.message}`,
+        );
+      }
+
+      // 4. Redirect merchant back to your frontend dashboard
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/dashboard?shop=${shop}&billing=success`,
+      );
+    }
+
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/dashboard?shop=${shop}&billing=failed`,
+    );
+  } catch (err) {
+    console.error("Billing Callback Processing Error:", err.message);
+    return res.status(500).send("Error processing billing activation.");
   }
 });
 
