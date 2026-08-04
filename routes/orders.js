@@ -14,8 +14,7 @@ router.post("/shopify-webhook", async (req, res) => {
   try {
     const orderData = req.body;
 
-    // 1. DYNAMIC MERCHANT LOOKUP
-    // Extract shop domain flexibly from headers or payload body, converting to lowercase
+    // 1. DYNAMIC MERCHANT LOOKUP & USAGE VERIFICATION
     const rawDomain =
       req.headers["x-shopify-shop-domain"] ||
       orderData.domain ||
@@ -23,27 +22,22 @@ router.post("/shopify-webhook", async (req, res) => {
       "manbil-test-store.myshopify.com";
 
     const shopDomain = rawDomain ? rawDomain.toLowerCase().trim() : null;
-    let merchant_id = orderData.merchant_id;
+    let merchantRecord = null;
 
-    // Resolve merchant_id using the shop domain if not directly provided
-    if (!merchant_id && shopDomain) {
-      const { data: merchantRecord, error: merchantError } = await supabase
+    if (shopDomain) {
+      const { data, error: merchantError } = await supabase
         .from("merchant")
-        .select("id")
+        .select("id, invoice_count, invoice_limit, subscription_plan")
         .eq("shop_domain", shopDomain)
         .maybeSingle();
 
       if (merchantError) {
         console.error("Supabase merchant lookup error:", merchantError.message);
       }
-
-      if (merchantRecord) {
-        merchant_id = merchantRecord.id;
-      }
+      merchantRecord = data;
     }
 
-    // Strict validation if merchant still cannot be resolved
-    if (!merchant_id) {
+    if (!merchantRecord) {
       console.error(`Merchant account lookup failed for domain: ${shopDomain}`);
       return res.status(400).json({
         success: false,
@@ -51,7 +45,25 @@ router.post("/shopify-webhook", async (req, res) => {
       });
     }
 
-    // 2. EXTRACT ORDER IDENTIFIERS & CUSTOMER DETAILS SAFELY
+    const merchant_id = merchantRecord.id;
+    const currentCount = merchantRecord.invoice_count || 0;
+    const limit = merchantRecord.invoice_limit || 50;
+
+    // 2. TRIAL & USAGE LIMIT GATEKEEPER
+    if (currentCount >= limit) {
+      console.warn(
+        `Trial/Usage limit reached for merchant ${shopDomain}. Action blocked.`,
+      );
+      return res.status(402).json({
+        success: false,
+        limit_reached: true,
+        error:
+          "Invoice usage limit reached. Please upgrade your subscription plan to continue generating invoices.",
+        upgrade_url: `/dashboard/billing?shop=${shopDomain}`,
+      });
+    }
+
+    // 3. EXTRACT ORDER IDENTIFIERS & CUSTOMER DETAILS SAFELY
     const order_id_source =
       orderData.id ||
       orderData.shopify_order_id ||
@@ -59,7 +71,6 @@ router.post("/shopify-webhook", async (req, res) => {
       orderData.transaction_id;
     const shopify_order_id = order_id_source ? String(order_id_source) : null;
 
-    // Extract customer details (handles both flat payloads and Shopify nested objects)
     const customer_email =
       orderData.email || orderData.customer_email || orderData.customer?.email;
 
@@ -70,7 +81,7 @@ router.post("/shopify-webhook", async (req, res) => {
     }
     if (!customer_name) customer_name = "Valued Customer";
 
-    // 3. EXTRACT PRODUCT & LINE ITEM DETAILS SAFELY
+    // 4. EXTRACT PRODUCT & LINE ITEM DETAILS SAFELY
     const firstLineItem =
       orderData.line_items && orderData.line_items.length > 0
         ? orderData.line_items[0]
@@ -96,7 +107,6 @@ router.post("/shopify-webhook", async (req, res) => {
     );
     const currency = orderData.currency || "USD";
 
-    // 4. STRICT EARLY-RETURN VALIDATION
     if (!shopify_order_id) {
       return res.status(400).json({
         success: false,
@@ -135,12 +145,6 @@ router.post("/shopify-webhook", async (req, res) => {
       );
     }
 
-    if (!insertedOrderArray || insertedOrderArray.length === 0) {
-      throw new Error(
-        "Database transaction failed: No order records were returned from Supabase client layer.",
-      );
-    }
-
     const savedOrder = insertedOrderArray[0];
 
     // 6. FILE STORAGE LAYER: Generate PDF asset via Puppeteer engine
@@ -166,7 +170,13 @@ router.post("/shopify-webhook", async (req, res) => {
       throw new Error(`Invoice index logging failed: ${invoiceError.message}`);
     }
 
-    // 8. EMAIL TRANSMISSION LAYER: Send invoice PDF link via Resend
+    // 8. INCREMENT USAGE COUNTER IN DATABASE
+    await supabase
+      .from("merchant")
+      .update({ invoice_count: currentCount + 1 })
+      .eq("id", merchant_id);
+
+    // 9. EMAIL TRANSMISSION LAYER: Send invoice PDF link via Resend
     const emailDelivery = await sendInvoiceEmail(
       customer_email,
       customer_name,
@@ -179,7 +189,6 @@ router.post("/shopify-webhook", async (req, res) => {
       );
     }
 
-    // Return successful processing status metrics
     return res.status(200).json({
       success: true,
       message:

@@ -43,7 +43,7 @@ router.get("/shopify", (req, res) => {
  * GET /auth/shopify/callback
  */
 router.get("/shopify/callback", async (req, res) => {
-  const { shop, hmac, code, state } = req.query;
+  const { shop, hmac, code, state, host } = req.query;
   const stateCookie = req.cookies.shopifyState;
 
   if (!state || state !== stateCookie) {
@@ -119,7 +119,7 @@ router.get("/shopify/callback", async (req, res) => {
         .eq("shop_domain", shop);
       dbError = error;
     } else {
-      // Insert new record with an explicit UUID
+      // Insert new record with explicit UUID
       const { error } = await supabase.from("merchant").insert([
         {
           id: crypto.randomUUID(),
@@ -141,7 +141,12 @@ router.get("/shopify/callback", async (req, res) => {
     }
 
     res.clearCookie("shopifyState");
-    return res.redirect(`${process.env.FRONTEND_URL}/dashboard?shop=${shop}`);
+
+    // Safe host parameter encoding & embedded Shopify Admin redirect path
+    const hostQuery = host ? `?host=${encodeURIComponent(host)}` : "";
+    const shopifyAdminAppUrl = `https://${shop}/admin/apps/${SHOPIFY_API_KEY}${hostQuery}`;
+
+    return res.redirect(shopifyAdminAppUrl);
   } catch (err) {
     console.error("Critical authorization flow runtime failure:", err.message);
     return res
