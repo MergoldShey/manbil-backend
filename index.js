@@ -6,6 +6,7 @@ require('dotenv').config();
 // 1. Import routing layers
 const ordersRouter = require('./routes/orders');
 const shopifyAuthRouter = require('./routes/shopifyAuth'); // Imported Step 1 auth router
+const billingRouter = require("./routes/billing");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -18,6 +19,7 @@ app.use(cookieParser()); // Required to safely read authentication cookies from 
 app.use('/api', ordersRouter);
 app.use('/orders', ordersRouter);
 app.use('/auth', shopifyAuthRouter); // Mounted Shopify installation routes safely to the root path
+app.use('/billing', billingRouter); // Mounted billing routes safely to the root path
 
 // A live database connection test endpoint
 app.get('/test-db', async (req, res) => {
